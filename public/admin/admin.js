@@ -96,10 +96,12 @@ function renderTab() {
   const body = $("tabBody");
   if (tab === "plans") body.innerHTML = plansHtml();
   else if (tab === "ids") { body.innerHTML = idsShell(); drawIdRows(); }
+  else if (tab === "free-likes") { body.innerHTML = freeLikesHtml(); loadFreeLikes(); }
   else if (tab === "ads") body.innerHTML = adsHtml();
   else if (tab === "pay") body.innerHTML = payHtml();
   else if (tab === "text") body.innerHTML = textHtml();
-  else body.innerHTML = backupHtml();
+  else if (tab === "backup") body.innerHTML = backupHtml();
+  else body.innerHTML = plansHtml();
 }
 
 function plansHtml() {
@@ -121,6 +123,37 @@ function plansHtml() {
       <td><input type="checkbox" data-bind="categories.${ci}.items.${ii}.visible" ${it.visible !== false ? "checked" : ""}></td>
       <td><button class="btn danger sm" data-act="delItem" data-i="${ci}" data-j="${ii}" aria-label="Delete plan">✕</button></td></tr>`).join("")}</table></div>
     <button class="btn line sm" data-act="addItem" data-i="${ci}">＋ Add plan</button></div>`).join("");
+}
+
+/* ---- Free Likes requests ---- */
+function freeLikesHtml() {
+  return `<div class="card"><div class="cardhead"><div><h3>Free Likes requests</h3><p class="help">View player requests and update their status. Players see status changes in their website account.</p></div><button class="btn line sm" data-act="freeLikesRefresh">↻ Refresh</button></div><div id="flAdminRequests"><p class="mu">Loading requests…</p></div></div>`;
+}
+async function loadFreeLikes() {
+  const target = $("flAdminRequests");
+  if (!target) return;
+  target.innerHTML = '<p class="mu">Loading requests…</p>';
+  try {
+    const data = await api("/api/free-likes-admin", { method: "GET" });
+    const requests = Array.isArray(data.requests) ? data.requests : [];
+    if (!$("flAdminRequests")) return;
+    if (!requests.length) {
+      $("flAdminRequests").innerHTML = '<p class="mu">No Free Likes requests yet.</p>';
+      return;
+    }
+    requests.sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
+    const count = requests.reduce((acc, request) => { acc[request.status] = (acc[request.status] || 0) + 1; return acc; }, {});
+    const summary = `<p class="help">Total: <b>${requests.length}</b> · Pending: <b>${count.Pending || 0}</b> · Processing: <b>${count.Processing || 0}</b> · Like Done: <b>${count["Like Done"] || 0}</b></p>`;
+    const rows = requests.map((request) => {
+      const created = request.createdAt ? new Date(request.createdAt).toLocaleString() : "—";
+      const status = String(request.status || "Pending");
+      const options = ["Pending", "Processing", "Like Done"].map((value) => `<button class="btn ${value === status ? "sm" : "line sm"}" data-act="freeLikesSetStatus" data-id="${esc(request.id)}" data-status="${esc(value)}" ${value === status ? "disabled" : ""}>${esc(value)}</button>`).join(" ");
+      return `<tr><td><b>${esc(request.id)}</b><br><span class="mu">${esc(created)}</span></td><td>${esc(request.username || "—")}</td><td><b>${esc(request.gameUid || "—")}</b></td><td>${esc(status)}</td><td><div class="tools" style="margin:0">${options}</div></td></tr>`;
+    }).join("");
+    $("flAdminRequests").innerHTML = summary + `<div class="tablewrap"><table class="t"><tr><th>Request / date</th><th>Player</th><th>Free Fire UID</th><th>Status</th><th>Update status</th></tr>${rows}</table></div>`;
+  } catch (error) {
+    if ($("flAdminRequests")) $("flAdminRequests").innerHTML = `<p class="err">${esc(error.message)}</p><button class="btn line sm" data-act="freeLikesRefresh">Try again</button>`;
+  }
 }
 
 /* ---- Rare IDs ---- */
@@ -319,6 +352,23 @@ document.addEventListener("click", async (e) => {
     case "delSafe": D.safety.splice(i, 1); return re();
     case "addFaq": D.faq.push({ q: "", a: "" }); return re();
     case "delFaq": D.faq.splice(i, 1); return re();
+
+    case "freeLikesRefresh": return loadFreeLikes();
+    case "freeLikesSetStatus": {
+      b.disabled = true;
+      try {
+        await api("/api/free-likes-admin", {
+          method: "POST",
+          body: JSON.stringify({ id: b.dataset.id, status: b.dataset.status })
+        });
+        note("Request status updated.");
+        await loadFreeLikes();
+      } catch (error) {
+        note(error.message);
+        b.disabled = false;
+      }
+      return;
+    }
 
     case "download": {
       const url = URL.createObjectURL(new Blob([JSON.stringify(D, null, 1)], { type: "application/json" }));
