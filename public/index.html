@@ -53,14 +53,13 @@
       <p class="mu">Create an account to submit requests and check notifications.</p>
       <div class="bar">
         <input id="flUsername" type="text" placeholder="Username" maxlength="32" autocomplete="username">
-        <input id="flPassword" type="password" placeholder="Password / Quick key (10+ characters)" minlength="10" autocomplete="current-password">
+        <input id="flPassword" type="password" placeholder="Password (10+ characters)" minlength="10" maxlength="128" autocomplete="current-password">
       </div>
       <div class="bar">
         <button class="btn sm" type="button" id="flRegister">Register</button>
         <button class="btn line sm" type="button" id="flLogin">Login</button>
-        <button class="btn line sm" type="button" id="flQuick">Quick Mode</button>
       </div>
-      <p class="note">Keep your username and password safe. Quick Mode also uses a private key so you can access your requests again.</p>
+      <p class="note">Keep your username and password safe. You need your account to submit requests and check their status.</p>
     </div>
 
     <div class="box" id="flRequestBox" hidden>
