@@ -39,6 +39,54 @@
 
 <div id="views"></div>
 
+<!-- FREE LIKES REQUEST SECTION -->
+<div class="view" id="v-free-likes">
+  <div class="wrap">
+    <button class="btn line sm back" data-go="home">← All categories</button>
+    <div class="head">
+      <h2>🎁 Free Likes</h2>
+      <p>Submit your Free Fire UID and track your request status.</p>
+    </div>
+
+    <div class="box" id="flAuthBox">
+      <h3>Player Login / Register</h3>
+      <p class="mu">Create an account to submit requests and check notifications.</p>
+      <div class="bar">
+        <input id="flUsername" type="text" placeholder="Username" maxlength="32" autocomplete="username">
+        <input id="flPassword" type="password" placeholder="Password / Quick key (10+ characters)" minlength="10" autocomplete="current-password">
+      </div>
+      <div class="bar">
+        <button class="btn sm" type="button" id="flRegister">Register</button>
+        <button class="btn line sm" type="button" id="flLogin">Login</button>
+        <button class="btn line sm" type="button" id="flQuick">Quick Mode</button>
+      </div>
+      <p class="note">Keep your username and password safe. Quick Mode also uses a private key so you can access your requests again.</p>
+    </div>
+
+    <div class="box" id="flRequestBox" hidden>
+      <div class="row">
+        <h3>Welcome, <span id="flPlayerName"></span>!</h3>
+        <button class="btn line sm" type="button" id="flLogout">Log out</button>
+      </div>
+      <form id="flRequestForm">
+        <label for="flUid">Free Fire UID</label>
+        <div class="bar">
+          <input id="flUid" type="text" inputmode="numeric" pattern="[0-9]{5,20}" maxlength="20" placeholder="Enter your Free Fire UID" required>
+          <button class="btn sm" type="submit">Send Request</button>
+        </div>
+      </form>
+      <div class="head">
+        <h3>🔔 My Requests &amp; Notifications</h3>
+        <p>Check your latest request status below.</p>
+      </div>
+      <div id="flMyRequests"><p class="mu">Log in to see your requests.</p></div>
+      <button class="btn line sm" type="button" id="flRefresh">Refresh Status</button>
+    </div>
+    <p class="note" id="flMessage" role="status" aria-live="polite"></p>
+  </div>
+</div>
+<!-- END FREE LIKES REQUEST SECTION -->
+
 <div class="view" id="v-ids"><div class="wrap">
 <button class="btn line sm back" data-go="home">← All categories</button>
 <div class="head"><h2>Rare Free Fire IDs</h2><p>Search the list, then message us to confirm availability and price.</p></div>
