@@ -34,7 +34,7 @@ async function load() {
 
 /* ---------- views ---------- */
 function show(k) {
-  const keys = ["home", "ids", "pay", ...cats().map((c) => c.id)];
+  const keys = ["home", "ids", "pay", "free-likes", ...cats().map((c) => c.id)];
   if (!keys.includes(k)) k = "home";
   document.querySelectorAll(".view").forEach((v) => v.classList.toggle("on", v.id === "v-" + k));
   window.scrollTo(0, 0);
@@ -137,7 +137,8 @@ function renderHome() {
   $("tiles").innerHTML =
     cats().map((c) => `<button class="tile ${c.hot ? "hot" : ""}" data-go="${esc(c.id)}"><span class="ic">${esc(c.icon)}</span><h3>${esc(c.title)}</h3><small>${esc(c.desc)}</small><span class="go">View plans →</span></button>`).join("") +
     `<button class="tile" data-go="ids"><span class="ic">✦</span><h3>Rare IDs</h3><small>Search ${freeIds().length} rare IDs</small><span class="go">View IDs →</span></button>` +
-    `<button class="tile" data-go="pay"><span class="ic">💳</span><h3>Payment methods</h3><small>${esc(D.payments.map((p) => p.name).join(" and ") || "Ask on WhatsApp")}</small><span class="go">View details →</span></button>`;
+    `<button class="tile" data-go="pay"><span class="ic">💳</span><h3>Payment methods</h3><small>${esc(D.payments.map((p) => p.name).join(" and ") || "Ask on WhatsApp")}</small><span class="go">View details →</span></button>` +
+    `<button class="tile" data-go="free-likes"><span class="ic">🎁</span><h3>Free Likes</h3><small>Register, request likes and track your status</small><span class="go">Request Free Likes →</span></button>`;
 
   $("safeGrid").innerHTML = D.safety.map((x) => `<div class="box"><h3>${esc(x.icon)} ${esc(x.title)}</h3><p class="mu">${esc(x.text)}</p></div>`).join("");
   $("faqList").innerHTML = D.faq.map((f) => `<details><summary>${esc(f.q)}</summary><p>${esc(f.a)}</p></details>`).join("");
@@ -145,7 +146,7 @@ function renderHome() {
   const w = wa("Hello " + STORE() + ", I need help.");
   ["navWa", "footWa", "fab", "ctaWa"].forEach((id) => ($(id).href = w));
   $("slipWa").href = wa("Hello " + STORE() + ", I have made a payment. Sending my slip now.");
-  $("footChips").innerHTML = cats().map((c) => `<button class="chip" data-go="${esc(c.id)}">${esc(c.title)}</button>`).join("") + '<button class="chip" data-go="ids">Rare IDs</button><button class="chip" data-go="pay">Payments</button>';
+  $("footChips").innerHTML = cats().map((c) => `<button class="chip" data-go="${esc(c.id)}">${esc(c.title)}</button>`).join("") + '<button class="chip" data-go="ids">Rare IDs</button><button class="chip" data-go="pay">Payments</button><button class="chip" data-go="free-likes">Free Likes</button>';
 
   typeTerminal(s, lines);
 }
@@ -218,6 +219,151 @@ function setupIds() {
   drawIds(true);
 }
 
+/* ---------- Free Likes player accounts and requests ---------- */
+const FL_TOKEN_KEY = "udithFreeLikesToken";
+const FL_NAME_KEY = "udithFreeLikesUsername";
+let flToken = "";
+let flPlayerName = "";
+let flPreviousStatuses = new Map();
+let flHasLoadedOnce = false;
+let flPollTimer = null;
+
+function flSessionGet(key) { try { return sessionStorage.getItem(key) || ""; } catch { return ""; } }
+function flSessionSet(key, value) { try { sessionStorage.setItem(key, value); } catch {} }
+function flSessionClear(key) { try { sessionStorage.removeItem(key); } catch {} }
+function flMessage(message, isError = false) {
+  const el = $("flMessage");
+  el.textContent = message;
+  el.style.color = isError ? "var(--r)" : "var(--muted)";
+}
+function flUpdateAuthView() {
+  $("flAuthBox").hidden = Boolean(flToken);
+  $("flRequestBox").hidden = !flToken;
+  $("flPlayerName").textContent = flPlayerName;
+}
+async function flPost(action, fields = {}) {
+  const response = await fetch("/api/free-likes", {
+    method: "POST",
+    headers: { "content-type": "application/json", ...(flToken ? { authorization: "Bearer " + flToken } : {}) },
+    body: JSON.stringify({ action, ...fields })
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(result.error || "Request failed. Please try again.");
+  return result;
+}
+async function flGetRequests() {
+  const response = await fetch("/api/free-likes", {
+    cache: "no-store",
+    headers: { authorization: "Bearer " + flToken }
+  });
+  const result = await response.json().catch(() => ({}));
+  if (response.status === 401) {
+    flLogout(false);
+    throw new Error("Your session expired. Please log in again.");
+  }
+  if (!response.ok) throw new Error(result.error || "Could not load requests.");
+  return Array.isArray(result.requests) ? result.requests : [];
+}
+function flRenderRequests(requests, notifyChanges = false) {
+  const target = $("flMyRequests");
+  if (!requests.length) {
+    target.innerHTML = '<div class="fl-empty">You have not submitted any Free Likes requests yet.</div>';
+  } else {
+    target.innerHTML = requests.map((request) => {
+      const status = String(request.status || "Pending");
+      const statusClass = status === "Like Done" ? "done" : status === "Processing" ? "processing" : "pending";
+      const created = request.createdAt ? new Date(request.createdAt).toLocaleString() : "Date unavailable";
+      return `<article class="fl-request"><div class="fl-request-top"><strong>${esc(request.id)}</strong><span class="fl-status ${statusClass}">${esc(status)}</span></div><p><b>Free Fire UID:</b> ${esc(request.gameUid)}</p><p class="fl-notification">🔔 ${esc(request.notification || "No new notification.")}</p><small>${esc(created)}</small></article>`;
+    }).join("");
+  }
+
+  if (notifyChanges && flHasLoadedOnce) {
+    for (const request of requests) {
+      const previous = flPreviousStatuses.get(request.id);
+      if (previous && previous !== request.status) note(`${request.id}: ${request.status}`);
+    }
+  }
+  flPreviousStatuses = new Map(requests.map((request) => [request.id, request.status]));
+  flHasLoadedOnce = true;
+}
+async function flLoadRequests(notifyChanges = false) {
+  if (!flToken) return;
+  try {
+    const requests = await flGetRequests();
+    flRenderRequests(requests, notifyChanges);
+  } catch (error) {
+    flMessage(error.message, true);
+  }
+}
+async function flAuthenticate(action) {
+  const username = $("flUsername").value.trim();
+  const password = $("flPassword").value;
+  if (username.length < 3) return flMessage("Username must be at least 3 characters.", true);
+  if (password.length < 10 || password.length > 128) return flMessage("Password must be 10–128 characters.", true);
+  const buttons = [$("flRegister"), $("flLogin")];
+  buttons.forEach((button) => { button.disabled = true; });
+  try {
+    const result = await flPost(action, { username, password });
+    flToken = result.token;
+    flPlayerName = result.username;
+    flSessionSet(FL_TOKEN_KEY, flToken);
+    flSessionSet(FL_NAME_KEY, flPlayerName);
+    flPreviousStatuses.clear();
+    flHasLoadedOnce = false;
+    flUpdateAuthView();
+    $("flPassword").value = "";
+    flMessage(action === "register" ? "Account created successfully." : "Logged in successfully.");
+    await flLoadRequests(false);
+  } catch (error) {
+    flMessage(error.message, true);
+  } finally {
+    buttons.forEach((button) => { button.disabled = false; });
+  }
+}
+function flLogout(showNotice = true) {
+  flToken = "";
+  flPlayerName = "";
+  flPreviousStatuses.clear();
+  flHasLoadedOnce = false;
+  flSessionClear(FL_TOKEN_KEY);
+  flSessionClear(FL_NAME_KEY);
+  flUpdateAuthView();
+  $("flMyRequests").innerHTML = '<p class="mu">Log in to see your requests.</p>';
+  if (showNotice) flMessage("You have been logged out.");
+}
+function initFreeLikes() {
+  flToken = flSessionGet(FL_TOKEN_KEY);
+  flPlayerName = flSessionGet(FL_NAME_KEY);
+  flUpdateAuthView();
+  $("flRegister").addEventListener("click", () => flAuthenticate("register"));
+  $("flLogin").addEventListener("click", () => flAuthenticate("login"));
+  $("flLogout").addEventListener("click", () => flLogout());
+  $("flRefresh").addEventListener("click", () => flLoadRequests(false));
+  $("flRequestForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!flToken) return flMessage("Please log in first.", true);
+    const gameUid = $("flUid").value.trim();
+    if (!/^[0-9]{5,20}$/.test(gameUid)) return flMessage("Enter a valid Free Fire UID (5–20 digits).", true);
+    const submit = $("flRequestForm").querySelector('button[type="submit"]');
+    submit.disabled = true;
+    try {
+      await flPost("submit", { gameUid });
+      $("flUid").value = "";
+      flMessage("Your Free Likes request was submitted successfully.");
+      await flLoadRequests(false);
+    } catch (error) {
+      flMessage(error.message, true);
+    } finally {
+      submit.disabled = false;
+    }
+  });
+  if (flToken) flLoadRequests(false);
+  if (flPollTimer) clearInterval(flPollTimer);
+  flPollTimer = setInterval(() => {
+    if (flToken && !document.hidden) flLoadRequests(true);
+  }, 30000);
+}
+
 /* ---------- ads popup ---------- */
 function showPopupAd() {
   const key = (a) => "udithAd_" + a.id;
@@ -280,7 +426,7 @@ function codeRain() {
 /* ---------- start ---------- */
 async function init() {
   D = await load();
-  renderHome(); renderCategories(); renderPayments(); setupIds(); renderCart(); renderOrders(); showPopupAd();
+  renderHome(); renderCategories(); renderPayments(); setupIds(); renderCart(); renderOrders(); showPopupAd(); initFreeLikes();
 
   document.addEventListener("click", (e) => {
     const go = e.target.closest("[data-go]"); if (go) show(go.dataset.go);
