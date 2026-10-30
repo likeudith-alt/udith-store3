@@ -2,22 +2,29 @@ import crypto from "node:crypto";
 import { dataStore, json } from "../lib/common.mjs";
 
 const store = () => dataStore();
-const secret = () =>
-  process.env.SESSION_SECRET || process.env.ADMIN_PASSWORD || "";
 
-const sign = (payload) =>
-  crypto.createHmac("sha256", secret()).update(payload).digest("base64url");
+const secret = () => process.env.SESSION_SECRET || "";
 
 function tokenFor(user) {
+  if (!secret()) {
+    throw new Error("SESSION_SECRET is not configured.");
+  }
+
   const payload = Buffer.from(
     JSON.stringify({
       sub: user.id,
       username: user.username,
+      type: "player",
       exp: Date.now() + 30 * 86400e3
     })
   ).toString("base64url");
 
-  return payload + "." + sign(payload);
+  const signature = crypto
+    .createHmac("sha256", secret())
+    .update(payload)
+    .digest("base64url");
+
+  return payload + "." + signature;
 }
 
 function readToken(req) {
@@ -29,12 +36,17 @@ function readToken(req) {
   const [payload, signature] = token.split(".");
   if (!payload || !signature) return null;
 
-  const actual = Buffer.from(signature);
-  const expected = Buffer.from(sign(payload));
+  const expected = crypto
+    .createHmac("sha256", secret())
+    .update(payload)
+    .digest("base64url");
+
+  const actualBuffer = Buffer.from(signature);
+  const expectedBuffer = Buffer.from(expected);
 
   if (
-    actual.length !== expected.length ||
-    !crypto.timingSafeEqual(actual, expected)
+    actualBuffer.length !== expectedBuffer.length ||
+    !crypto.timingSafeEqual(actualBuffer, expectedBuffer)
   ) {
     return null;
   }
@@ -43,7 +55,17 @@ function readToken(req) {
     const data = JSON.parse(
       Buffer.from(payload, "base64url").toString()
     );
-    return data.exp > Date.now() ? data : null;
+
+    if (
+      data.type !== "player" ||
+      typeof data.sub !== "string" ||
+      typeof data.exp !== "number" ||
+      data.exp <= Date.now()
+    ) {
+      return null;
+    }
+
+    return data;
   } catch {
     return null;
   }
@@ -66,19 +88,39 @@ async function read(key, fallback) {
 }
 
 export default async (req) => {
+  if (!secret()) {
+    return json(
+      { error: "Server authentication is not configured." },
+      500
+    );
+  }
+
   if (req.method === "GET") {
     const auth = readToken(req);
+
     if (!auth) {
       return json({ error: "Please log in again." }, 401);
+    }
+
+    const users = await read("free-likes-users", []);
+    const user = users.find((item) => item.id === auth.sub);
+
+    if (!user) {
+      return json(
+        { error: "Account not found. Please log in again." },
+        401
+      );
     }
 
     const all = await read("free-likes-requests", []);
 
     return json({
       requests: all
-        .filter((item) => item.userId === auth.sub)
+        .filter((item) => item.userId === user.id)
         .map(({ userId, ...item }) => item)
-        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+        .sort((a, b) =>
+          b.createdAt.localeCompare(a.createdAt)
+        )
     });
   }
 
@@ -87,6 +129,7 @@ export default async (req) => {
   }
 
   let body;
+
   try {
     body = await req.json();
   } catch {
@@ -98,7 +141,9 @@ export default async (req) => {
   try {
     const users = await read("free-likes-users", []);
 
-    if (["register", "login", "quick"].includes(action)) {
+    // Only registration and login are allowed.
+    // Quick Mode has been completely removed.
+    if (action === "register" || action === "login") {
       const username = cleanName(body.username);
       const password = String(body.password || "");
 
@@ -109,12 +154,9 @@ export default async (req) => {
         );
       }
 
-      if (password.length < 10) {
+      if (password.length < 10 || password.length > 128) {
         return json(
-          {
-            error:
-              "Password or quick key must be at least 10 characters."
-          },
+          { error: "Password must be between 10 and 128 characters." },
           400
         );
       }
@@ -147,31 +189,6 @@ export default async (req) => {
 
         users.push(user);
         await store().setJSON("free-likes-users", users);
-      } else if (action === "quick") {
-        if (user) {
-          if (hashPass(password, user.salt) !== user.passwordHash) {
-            return json(
-              {
-                error:
-                  "That username is already used. Choose another username or log in."
-              },
-              409
-            );
-          }
-        } else {
-          const salt = crypto.randomBytes(16).toString("hex");
-
-          user = {
-            id: crypto.randomUUID(),
-            username,
-            salt,
-            passwordHash: hashPass(password, salt),
-            createdAt: new Date().toISOString()
-          };
-
-          users.push(user);
-          await store().setJSON("free-likes-users", users);
-        }
       } else {
         if (
           !user ||
@@ -191,6 +208,7 @@ export default async (req) => {
     }
 
     const auth = readToken(req);
+
     if (!auth) {
       return json({ error: "Please log in again." }, 401);
     }
@@ -211,18 +229,26 @@ export default async (req) => {
 
       if (uid.length < 5) {
         return json(
-          { error: "Enter a valid Free Fire UID (at least 5 digits)." },
+          {
+            error:
+              "Enter a valid Free Fire UID (at least 5 digits)."
+          },
           400
         );
       }
 
       const all = await read("free-likes-requests", []);
 
-      const recent = all.filter(
-        (item) =>
+      const recent = all.filter((item) => {
+        const age = Date.now() - Date.parse(item.createdAt);
+
+        return (
           item.userId === user.id &&
-          Date.now() - Date.parse(item.createdAt) < 24 * 3600e3
-      );
+          Number.isFinite(age) &&
+          age >= 0 &&
+          age < 24 * 3600e3
+        );
+      });
 
       if (recent.length >= 3) {
         return json(
@@ -234,7 +260,9 @@ export default async (req) => {
       const now = new Date().toISOString();
 
       const request = {
-        id: "FL-" + crypto.randomBytes(4).toString("hex").toUpperCase(),
+        id:
+          "FL-" +
+          crypto.randomBytes(4).toString("hex").toUpperCase(),
         userId: user.id,
         username: user.username,
         gameUid: uid,
