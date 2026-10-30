@@ -106,3 +106,17 @@ body::before{background:radial-gradient(ellipse at 18% 18%,color-mix(in srgb,var
 .dp .ad{border:0;margin:0;flex-direction:column}.dp .ad img{width:100%;max-height:260px}
 .more{margin:18px auto 0;display:flex}
 @media (max-width:620px){.ad{flex-direction:column}.ad img{width:100%;max-height:220px}}
+
+/* ---- Free Likes account and request cards ---- */
+#flAuthBox,#flRequestBox{margin-top:18px}
+#flAuthBox .bar input{min-width:220px}
+.fl-request{border:1px solid var(--line);background:var(--panel);padding:16px 18px;margin:10px 0}
+.fl-request-top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.fl-request p{margin:9px 0 0;overflow-wrap:anywhere}
+.fl-notification{color:var(--c)}
+.fl-request small{display:block;color:var(--muted);margin-top:8px}
+.fl-status{display:inline-block;padding:3px 10px;border:1px solid var(--line);font-size:.78rem;font-weight:700}
+.fl-status.pending{color:#ffd24a;border-color:#8b6c20}
+.fl-status.processing{color:var(--c);border-color:var(--c)}
+.fl-status.done{color:var(--g);border-color:var(--g)}
+.fl-empty{border:1px dashed var(--line);padding:18px;color:var(--muted)}
